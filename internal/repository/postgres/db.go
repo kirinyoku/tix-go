@@ -60,4 +60,7 @@ func (s *Store) RunTx(
 	return nil
 }
 
+func (s *Store) Query() *QueryRepo              { return &QueryRepo{pool: s.pool} }
+func (s *Store) Admin() *AdminRepo              { return &AdminRepo{pool: s.pool} }
+func (s *Store) Orders() *OrderRepo             { return &OrderRepo{pool: s.pool} }
 func (s *Store) Reservations() *ReservationRepo { return &ReservationRepo{pool: s.pool} }
