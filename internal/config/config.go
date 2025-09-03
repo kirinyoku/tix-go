@@ -108,14 +108,9 @@ func New() (*Config, error) {
 		redisAddr = "localhost:6380"
 	}
 
-	redisPassword := os.Getenv("REDIS_PASSWORD")
-	if redisPassword == "" {
-		return nil, fmt.Errorf("%s: missing REDIS_PASSWORD", op)
-	}
-
 	redisCfg := RedisConfig{
 		Addr:     redisAddr,
-		Password: redisPassword,
+		Password: "",
 		DB:       0,
 	}
 
