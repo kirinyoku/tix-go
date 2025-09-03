@@ -1,9 +1,11 @@
-package postgresrepo
+package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kirinyoku/tix-go/internal/domain"
@@ -27,11 +29,17 @@ func (r *QueryRepo) handle() DB {
 	return r.pool
 }
 
-func (r *QueryRepo) GetVenue(
-	ctx context.Context,
-	id int64,
-) (*domain.Venue, error) {
-	const op = "postgresrepo.QueryRepo.GetVenue"
+// GetVenue retrieves a venue by its ID.
+//
+// Parameters:
+//   - ctx: request-scoped context for cancellation and timeouts.
+//   - id: unique identifier of the venue to retrieve.
+//
+// Returns:
+//   - *domain.Venue: the venue when found.
+//   - error: repository.ErrNotFound if the venue is not found.
+func (r *QueryRepo) GetVenue(ctx context.Context, id int64) (*domain.Venue, error) {
+	const op = "postgres.QueryRepo.GetVenue"
 
 	db := r.handle()
 
@@ -42,17 +50,23 @@ func (r *QueryRepo) GetVenue(
 		id,
 	).Scan(&v.ID, &v.Name, &v.SeatingScheme)
 	if err != nil {
-		return nil, wrapDBErr(op, err)
+		return nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	return &v, nil
 }
 
-func (r *QueryRepo) GetEvent(
-	ctx context.Context,
-	id int64,
-) (*domain.Event, error) {
-	const op = "postgresrepo.QueryRepo.GetEvent"
+// GetEvent retrieves an event by its ID.
+//
+// Parameters:
+//   - ctx: request-scoped context for cancellation and timeouts.
+//   - id: unique identifier of the event to retrieve.
+//
+// Returns:
+//   - *domain.Event: the event when found.
+//   - error: repository.ErrNotFound if the event is not found.
+func (r *QueryRepo) GetEvent(ctx context.Context, id int64) (*domain.Event, error) {
+	const op = "postgres.QueryRepo.GetEvent"
 
 	db := r.handle()
 
@@ -63,17 +77,23 @@ func (r *QueryRepo) GetEvent(
 		id,
 	).Scan(&e.ID, &e.VenueID, &e.Title, &e.Starts, &e.Ends)
 	if err != nil {
-		return nil, wrapDBErr(op, err)
+		return nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	return &e, nil
 }
 
-func (r *QueryRepo) ListEvents(
-	ctx context.Context,
-	limit, offset int,
-) ([]domain.Event, error) {
-	const op = "postgresrepo.QueryRepo.ListEvents"
+// ListEvents lists all events.
+//
+// Parameters:
+//   - ctx: request-scoped context for cancellation and timeouts.
+//   - limit, offset: pagination parameters.
+//
+// Returns:
+//   - []domain.Event: list of events.
+//   - error: repository.ErrNotFound if no events are found.
+func (r *QueryRepo) ListEvents(ctx context.Context, limit, offset int) ([]domain.Event, error) {
+	const op = "postgres.QueryRepo.ListEvents"
 
 	db := r.handle()
 
@@ -85,7 +105,7 @@ func (r *QueryRepo) ListEvents(
 		limit, offset,
 	)
 	if err != nil {
-		return nil, wrapDBErr(op, err)
+		return nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	defer rows.Close()
@@ -94,7 +114,7 @@ func (r *QueryRepo) ListEvents(
 	for rows.Next() {
 		var e domain.Event
 		if err := rows.Scan(&e.ID, &e.VenueID, &e.Title, &e.Ends); err != nil {
-			return nil, wrapDBErr(op, err)
+			return nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 		}
 
 		out = append(out, e)
@@ -106,11 +126,17 @@ func (r *QueryRepo) ListEvents(
 	return out, nil
 }
 
-func (r *QueryRepo) CountsByStatus(
-	ctx context.Context,
-	eventID int64,
-) (*domain.EventCounts, error) {
-	const op = "postgresrepo.QueryRepo.CountsByStatus"
+// CountsByStatus counts seats by status for an event.
+//
+// Parameters:
+//   - ctx: request-scoped context for cancellation and timeouts.
+//   - eventID: unique identifier of the event to retrieve.
+//
+// Returns:
+//   - *domain.EventCounts: the event counts when found.
+//   - error: repository.ErrNotFound if the event is not found.
+func (r *QueryRepo) CountsByStatus(ctx context.Context, eventID int64) (*domain.EventCounts, error) {
+	const op = "postgres.QueryRepo.CountsByStatus"
 
 	db := r.handle()
 
@@ -125,7 +151,7 @@ func (r *QueryRepo) CountsByStatus(
 		eventID,
 	).Scan(&ec.Available, &ec.Held, &ec.Sold)
 	if err != nil {
-		return nil, wrapDBErr(op, err)
+		return nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	ec.Total = ec.Available + ec.Held + ec.Sold
@@ -133,13 +159,23 @@ func (r *QueryRepo) CountsByStatus(
 	return &ec, nil
 }
 
-func (r *QueryRepo) ListEventsSeats(
+// ListEventSeats lists seats for an event.
+//
+// Parameters:
+//   - ctx: request-scoped context for cancellation and timeouts.
+//   - eventID: unique identifier of the event to retrieve.
+//   - onlyAvailable: flag to filter only available seats.
+//
+// Returns:
+//   - []domain.SeatWithStatus: list of seats with their status.
+//   - error: repository.ErrNotFound if the event is not found.
+func (r *QueryRepo) ListEventSeats(
 	ctx context.Context,
 	eventID int64,
 	onlyAvailable bool,
 	limit, offset int,
 ) ([]domain.SeatWithStatus, error) {
-	const op = "postgresrepo.QueryRepo.ListEventsSeats"
+	const op = "postgres.QueryRepo.ListEventSeats"
 
 	db := r.handle()
 
@@ -168,7 +204,7 @@ func (r *QueryRepo) ListEventsSeats(
 		)
 	}
 	if err != nil {
-		return nil, wrapDBErr(op, err)
+		return nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	defer rows.Close()
@@ -186,7 +222,7 @@ func (r *QueryRepo) ListEventsSeats(
 			&sws.Number,
 			&status,
 		); err != nil {
-			return nil, wrapDBErr(op, err)
+			return nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 		}
 
 		sws.Status = domain.SeatStatus(status)
@@ -199,11 +235,17 @@ func (r *QueryRepo) ListEventsSeats(
 	return out, nil
 }
 
-func (r *QueryRepo) GetOrderWithTickets(
-	ctx context.Context,
-	orderID string,
-) (*domain.OrderWithTickets, error) {
-	const op = "postgresrepo.QueryRepo.GetOrderWithTickets"
+// GetOrderWithTickets retrieves an order with its tickets.
+//
+// Parameters:
+//   - ctx: request-scoped context for cancellation and timeouts.
+//   - orderID: unique identifier of the order to retrieve.
+//
+// Returns:
+//   - *domain.OrderWithTickets: the order with its tickets when found.
+//   - error: repository.ErrNotFound if the order is not found.
+func (r *QueryRepo) GetOrderWithTickets(ctx context.Context, orderID string) (*domain.OrderWithTickets, error) {
+	const op = "postgres.QueryRepo.GetOrderWithTickets"
 
 	db := r.handle()
 
@@ -222,7 +264,7 @@ func (r *QueryRepo) GetOrderWithTickets(
 		&out.Order.CreatedAt,
 	)
 	if err != nil {
-		return nil, wrapDBErr(op, err)
+		return nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	rows, err := db.Query(ctx,
@@ -233,7 +275,7 @@ func (r *QueryRepo) GetOrderWithTickets(
 		orderID,
 	)
 	if err != nil {
-		return nil, wrapDBErr(op, err)
+		return nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	defer rows.Close()
@@ -248,7 +290,7 @@ func (r *QueryRepo) GetOrderWithTickets(
 			&t.SeatID,
 			&t.Created,
 		); err != nil {
-			return nil, wrapDBErr(op, err)
+			return nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 		}
 
 		out.Tickets = append(out.Tickets, t)
@@ -260,57 +302,26 @@ func (r *QueryRepo) GetOrderWithTickets(
 	return &out, nil
 }
 
-func (r *QueryRepo) DebugCountSeatsByStatus(
-	ctx context.Context,
-	eventID int64,
-) (map[string]int64, error) {
-	const op = "postgresrepo.QueryRepo.DebugCountSeatsByStatus"
+// EventIDByHold retrieves an event ID by its hold ID.
+//
+// Returns:
+//   - int64: the event ID when found.
+//   - error: repository.ErrNotFound if the hold is not found.
+func (r *QueryRepo) EventIDByHold(ctx context.Context, holdID uuid.UUID) (int64, error) {
+	const op = "postgres.QueryRepo.EventIDByHold"
 
 	db := r.handle()
 
-	rows, err := db.Query(ctx,
-		`SELECT status, COUNT(*)
-       	 FROM event_seats
-      	 WHERE event_id = $1
-      	 GROUP BY status`,
-		eventID,
-	)
+	var eventID int64
+
+	err := db.QueryRow(ctx, `SELECT event_id FROM holds WHERE id = $1`, holdID).Scan(&eventID)
 	if err != nil {
-		return nil, wrapDBErr(op, err)
-	}
-
-	defer rows.Close()
-
-	res := make(map[string]int64, 3)
-
-	for rows.Next() {
-		var st string
-		var c int64
-
-		if err := rows.Scan(&st, &c); err != nil {
-			return nil, wrapDBErr(op, err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, fmt.Errorf("%s:%w", op, translateDBErr(err))
 		}
 
-		res[st] = c
+		return 0, fmt.Errorf("%s:%w", op, err)
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("%s:%w", op, err)
-	}
-
-	return res, nil
-}
-
-func (r *QueryRepo) EnsureEventExists(
-	ctx context.Context,
-	eventID int64,
-) error {
-	const op = "postgresrepo.QueryRepo.EnsureEventExists"
-
-	_, err := r.GetEvent(ctx, eventID)
-	if err != nil {
-		return fmt.Errorf("%s:%w", op, err)
-	}
-
-	return nil
+	return eventID, nil
 }

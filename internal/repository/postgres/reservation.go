@@ -1,8 +1,9 @@
-package postgresrepo
+package postgres
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,6 +30,19 @@ func (r *ReservationRepo) handle() DB {
 	return r.pool
 }
 
+// HoldSeats holds seats for a user.
+//
+// Parameters:
+//   - ctx: request-scoped context for cancellation and timeouts.
+//   - eventID: unique identifier of the event to retrieve.
+//   - userID: unique identifier of the user holding the seats.
+//   - seatIDs: list of seat IDs to hold.
+//   - ttl: time-to-live for the hold.
+//
+// Returns:
+//   - uuid.UUID: the hold ID when successful.
+//   - error: repository.ErrSeatsUnavailable if some seats are not available.
+//   - error: repository.ErrConflict if there is a conflict creating the hold.
 func (r *ReservationRepo) HoldSeats(
 	ctx context.Context,
 	eventID int64,
@@ -36,16 +50,12 @@ func (r *ReservationRepo) HoldSeats(
 	seatIDs []int64,
 	ttl time.Duration,
 ) (uuid.UUID, error) {
-	const op = "postgresrepo.ReservationRepo.HoldSeats"
-
-	if len(seatIDs) == 0 {
-		return uuid.Nil, repository.ErrSeatsUnavailable
-	}
+	const op = "postgres.ReservationRepo.HoldSeats"
 
 	if r.db != nil {
 		id, err := r.holdSeatsCore(ctx, r.db, eventID, userID, seatIDs, ttl)
 		if err != nil {
-			return uuid.Nil, wrapDBErr(op, err)
+			return uuid.Nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 		}
 		return id, nil
 	}
@@ -55,34 +65,42 @@ func (r *ReservationRepo) HoldSeats(
 		AccessMode: pgx.ReadWrite,
 	})
 	if err != nil {
-		return uuid.Nil, wrapDBErr(op, err)
+		return uuid.Nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	defer tx.Rollback(ctx)
 
 	holdID, err := r.holdSeatsCore(ctx, tx, eventID, userID, seatIDs, ttl)
 	if err != nil {
-		return uuid.Nil, wrapDBErr(op, err)
+		return uuid.Nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return uuid.Nil, wrapDBErr(op, err)
+		return uuid.Nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	return holdID, nil
 }
 
-func (r *ReservationRepo) ConfirmHold(
-	ctx context.Context,
-	holdID uuid.UUID,
-	totalCents int,
-) (uuid.UUID, error) {
-	const op = "postgresrepo.ReservationRepo.ConfirmHold"
+// ConfirmHold confirms a hold and creates an order.
+//
+// Parameters:
+//   - ctx: request-scoped context for cancellation and timeouts.
+//   - holdID: unique identifier of the hold to confirm.
+//   - totalCents: total amount in cents to charge for the order.
+//
+// Returns:
+//   - uuid.UUID: the order ID when successful.
+//   - error: repository.ErrHoldExpired if the hold is expired.
+//   - error: repository.ErrNothingToConfirm if there are no seats to confirm.
+//   - error: repository.ConflictError if there is a conflict creating the order or tickets.
+func (r *ReservationRepo) ConfirmHold(ctx context.Context, holdID uuid.UUID, totalCents int) (uuid.UUID, error) {
+	const op = "postgres.ReservationRepo.ConfirmHold"
 
 	if r.db != nil {
 		id, err := r.confirmHoldCore(ctx, r.db, holdID, totalCents)
 		if err != nil {
-			return uuid.Nil, wrapDBErr(op, err)
+			return uuid.Nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 		}
 		return id, nil
 	}
@@ -92,32 +110,37 @@ func (r *ReservationRepo) ConfirmHold(
 		AccessMode: pgx.ReadWrite,
 	})
 	if err != nil {
-		return uuid.Nil, wrapDBErr(op, err)
+		return uuid.Nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	defer tx.Rollback(ctx)
 
 	orderID, err := r.confirmHoldCore(ctx, tx, holdID, totalCents)
 	if err != nil {
-		return uuid.Nil, wrapDBErr(op, err)
+		return uuid.Nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return uuid.Nil, wrapDBErr(op, err)
+		return uuid.Nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	return orderID, nil
 }
 
-func (r *ReservationRepo) CancelHold(
-	ctx context.Context,
-	holdID uuid.UUID,
-) error {
-	const op = "postgresrepo.ReservationRepo.CancelHold"
+// CancelHold cancels a hold.
+//
+// Parameters:
+//   - ctx: request-scoped context for cancellation and timeouts.
+//   - holdID: unique identifier of the hold to cancel.
+//
+// Returns:
+//   - error: repository.ErrNotFound if the hold is not found.
+func (r *ReservationRepo) CancelHold(ctx context.Context, holdID uuid.UUID) error {
+	const op = "postgres.ReservationRepo.CancelHold"
 
 	if r.db != nil {
 		if err := r.cancelHoldCore(ctx, r.db, holdID); err != nil {
-			return wrapDBErr(op, err)
+			return fmt.Errorf("%s:%w", op, translateDBErr(err))
 		}
 		return nil
 	}
@@ -127,24 +150,32 @@ func (r *ReservationRepo) CancelHold(
 		AccessMode: pgx.ReadWrite,
 	})
 	if err != nil {
-		return wrapDBErr(op, err)
+		return fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	defer tx.Rollback(ctx)
 
 	if err := r.cancelHoldCore(ctx, tx, holdID); err != nil {
-		return wrapDBErr(op, err)
+		return fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return wrapDBErr(op, err)
+		return fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	return nil
 }
 
+// ExpireHolds expires old holds.
+//
+// Parameters:
+//   - ctx: request-scoped context for cancellation and timeouts.
+//
+// Returns:
+//   - int64: the number of expired holds.
+//   - error: if any error occurs while expiring holds.
 func (r *ReservationRepo) ExpireHolds(ctx context.Context) (int64, error) {
-	const op = "postgresrepo.ReservedRepo.ExpireHolds"
+	const op = "postgres.ReservationRepo.ExpireHolds"
 
 	db := r.handle()
 
@@ -155,14 +186,14 @@ func (r *ReservationRepo) ExpireHolds(ctx context.Context) (int64, error) {
       	 WHERE status = 'held' AND hold_expires_at <= now()`,
 	)
 	if err != nil {
-		return 0, wrapDBErr(op, err)
+		return 0, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	released += tag.RowsAffected()
 
 	_, err = db.Exec(ctx, `DELETE FROM holds WHERE expires_at <= now()`)
 	if err != nil {
-		return released, wrapDBErr(op, err)
+		return released, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	return released, nil
@@ -176,7 +207,8 @@ func (r *ReservationRepo) holdSeatsCore(
 	seatIDs []int64,
 	ttl time.Duration,
 ) (uuid.UUID, error) {
-	const op = "postgresrepo.ReservationRepo.holdSeatsCore"
+	const op = "postgres.ReservationRepo.holdSeatsCore"
+
 	holdID := uuid.New()
 	expires := time.Now().Add(ttl)
 
@@ -188,7 +220,7 @@ func (r *ReservationRepo) holdSeatsCore(
         	AND hold_expires_at <= now()`,
 		eventID,
 	); err != nil {
-		return uuid.Nil, wrapDBErr(op, err)
+		return uuid.Nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	if _, err := db.Exec(ctx,
@@ -196,7 +228,7 @@ func (r *ReservationRepo) holdSeatsCore(
        	 VALUES ($1, $2, $3, $4)`,
 		holdID, eventID, userID, expires,
 	); err != nil {
-		return uuid.Nil, wrapDBErr(op, err)
+		return uuid.Nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	tag, err := db.Exec(ctx,
@@ -208,11 +240,11 @@ func (r *ReservationRepo) holdSeatsCore(
 		eventID, seatIDs, holdID, expires,
 	)
 	if err != nil {
-		return uuid.Nil, wrapDBErr(op, err)
+		return uuid.Nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	if int(tag.RowsAffected()) != len(seatIDs) {
-		return uuid.Nil, wrapDBErr(op, repository.ErrSeatsUnavailable)
+		return uuid.Nil, fmt.Errorf("%s:%w", op, repository.ErrSeatsUnavailable)
 	}
 
 	return holdID, nil
@@ -224,7 +256,8 @@ func (r *ReservationRepo) confirmHoldCore(
 	holdID uuid.UUID,
 	totalCents int,
 ) (uuid.UUID, error) {
-	const op = "postgresrepo.ReservationRepo.confirmHoldCore"
+	const op = "postgres.ReservationRepo.confirmHoldCore"
+
 	var eventID int64
 	var userID int64
 
@@ -235,9 +268,9 @@ func (r *ReservationRepo) confirmHoldCore(
 		holdID,
 	).Scan(&eventID, &userID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return uuid.Nil, wrapDBErr(op, repository.ErrHoldExpired)
+			return uuid.Nil, fmt.Errorf("%s:%w", op, repository.ErrHoldExpired)
 		}
-		return uuid.Nil, wrapDBErr(op, err)
+		return uuid.Nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	rows, err := db.Query(ctx,
@@ -248,7 +281,7 @@ func (r *ReservationRepo) confirmHoldCore(
 		holdID,
 	)
 	if err != nil {
-		return uuid.Nil, wrapDBErr(op, err)
+		return uuid.Nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	defer rows.Close()
@@ -257,16 +290,16 @@ func (r *ReservationRepo) confirmHoldCore(
 	for rows.Next() {
 		var sid int64
 		if err := rows.Scan(&sid); err != nil {
-			return uuid.Nil, wrapDBErr(op, err)
+			return uuid.Nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 		}
 		seatIDs = append(seatIDs, sid)
 	}
 	if err := rows.Err(); err != nil {
-		return uuid.Nil, wrapDBErr(op, err)
+		return uuid.Nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	if len(seatIDs) == 0 {
-		return uuid.Nil, wrapDBErr(op, repository.ErrNothingToConfirm)
+		return uuid.Nil, fmt.Errorf("%s:%w", op, repository.ErrNothingToConfirm)
 	}
 
 	orderID := uuid.New()
@@ -275,7 +308,7 @@ func (r *ReservationRepo) confirmHoldCore(
        	 VALUES ($1, $2, $3, $4)`,
 		orderID, eventID, userID, totalCents,
 	); err != nil {
-		return uuid.Nil, wrapDBErr(op, err)
+		return uuid.Nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	batch := &pgx.Batch{}
@@ -287,7 +320,7 @@ func (r *ReservationRepo) confirmHoldCore(
 		)
 	}
 	if err := db.SendBatch(ctx, batch).Close(); err != nil {
-		return uuid.Nil, wrapDBErr(op, err)
+		return uuid.Nil, fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	_, _ = db.Exec(ctx, `DELETE FROM holds WHERE id = $1`, holdID)
@@ -295,12 +328,9 @@ func (r *ReservationRepo) confirmHoldCore(
 	return orderID, nil
 }
 
-func (r *ReservationRepo) cancelHoldCore(
-	ctx context.Context,
-	db DB,
-	holdID uuid.UUID,
-) error {
-	const op = "postgresrepo.ReservationRepo.cancelHoldCore"
+func (r *ReservationRepo) cancelHoldCore(ctx context.Context, db DB, holdID uuid.UUID) error {
+	const op = "postgres.ReservationRepo.cancelHoldCore"
+
 	_, err := db.Exec(ctx,
 		`UPDATE event_seats
          SET status = 'available', hold_id = NULL, hold_expires_at = NULL
@@ -308,16 +338,16 @@ func (r *ReservationRepo) cancelHoldCore(
 		holdID,
 	)
 	if err != nil {
-		return wrapDBErr(op, err)
+		return fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	ct, err := db.Exec(ctx, `DELETE FROM holds WHERE id = $1`, holdID)
 	if err != nil {
-		return wrapDBErr(op, err)
+		return fmt.Errorf("%s:%w", op, translateDBErr(err))
 	}
 
 	if ct.RowsAffected() == 0 {
-		return wrapDBErr(op, repository.ErrHoldNotFound)
+		return fmt.Errorf("%s:%w", op, repository.ErrNotFound)
 	}
 
 	return nil
