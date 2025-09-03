@@ -1,26 +1,36 @@
-package redisx
+package redis
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
-func New(ctx context.Context, addr, pass string, db int) (*redis.Client, error) {
-	rdb := redis.NewClient(&redis.Options{
-		Addr:        addr,
-		Password:    pass,
-		DB:          db,
-		DialTimeout: 2 * time.Second,
-	})
+type Config struct {
+	Addr     string
+	Password string
+	DB       int
+}
 
-	ctxPing, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
+func New(ctx context.Context, cfg Config) (*redis.Client, error) {
+	const op = "redis.New"
 
-	if err := rdb.Ping(ctxPing).Err(); err != nil {
-		return nil, err
+	opts := &redis.Options{
+		Addr:     cfg.Addr,
+		Password: cfg.Password,
+		DB:       cfg.DB,
 	}
 
-	return rdb, nil
+	client := redis.NewClient(opts)
+
+	ctxPing, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	if _, err := client.Ping(ctxPing).Result(); err != nil {
+		return nil, fmt.Errorf("%s:%w", op, err)
+	}
+
+	return client, nil
 }
