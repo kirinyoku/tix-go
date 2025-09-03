@@ -1,4 +1,21 @@
 services:
+  tix-go:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    env_file:
+      - .env
+    networks:
+      - tix-go
+
   postgres:
     image: postgres
     environment:
@@ -20,19 +37,16 @@ services:
 
   redis:
     image: redis
-    environment:
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
-      - REDIS_USER=${REDIS_USER}
-      - REDIS_USER_PASSWORD=${REDIS_USER_PASSWORD}
+    command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "6380:6379"
+      - "6379:6379"
     volumes:
       - redisdata:/data
     healthcheck:
-      test: ["CMD-SHELL", 'if [ -z "${REDIS_PASSWORD}" ]; then redis-cli ping; else redis-cli -a "${REDIS_PASSWORD}" ping; fi']
-      interval: 30s
-      timeout: 10s
-      retries: 5
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     restart: unless-stopped
     networks:
       - tix-go
