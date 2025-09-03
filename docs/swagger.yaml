@@ -1,0 +1,376 @@
+basePath: /
+definitions:
+  domain.Event:
+    properties:
+      ends:
+        type: string
+      id:
+        format: int64
+        type: integer
+      starts:
+        type: string
+      title:
+        type: string
+      venueID:
+        format: int64
+        type: integer
+    type: object
+  domain.EventCounts:
+    properties:
+      available:
+        format: int64
+        type: integer
+      held:
+        format: int64
+        type: integer
+      sold:
+        format: int64
+        type: integer
+      total:
+        format: int64
+        type: integer
+    type: object
+  domain.Order:
+    properties:
+      createdAt:
+        type: string
+      eventID:
+        format: int64
+        type: integer
+      id:
+        type: string
+      totalCents:
+        type: integer
+      userID:
+        format: int64
+        type: integer
+    type: object
+  domain.OrderWithTickets:
+    properties:
+      order:
+        $ref: '#/definitions/domain.Order'
+      tickets:
+        items:
+          $ref: '#/definitions/domain.Ticket'
+        type: array
+    type: object
+  domain.SeatStatus:
+    enum:
+    - available
+    - held
+    - sold
+    type: string
+    x-enum-varnames:
+    - SeatAvailable
+    - SeatHeld
+    - SeatSold
+  domain.SeatWithStatus:
+    properties:
+      id:
+        format: int64
+        type: integer
+      number:
+        type: integer
+      row:
+        type: string
+      section:
+        type: string
+      status:
+        $ref: '#/definitions/domain.SeatStatus'
+      venueID:
+        format: int64
+        type: integer
+    type: object
+  domain.Ticket:
+    properties:
+      created:
+        type: string
+      eventID:
+        format: int64
+        type: integer
+      id:
+        type: string
+      orderID:
+        type: string
+      seatID:
+        format: int64
+        type: integer
+    type: object
+  httpgin.BatchCreateSeatsRequest:
+    properties:
+      seats:
+        items:
+          $ref: '#/definitions/httpgin.SeatInput'
+        minItems: 1
+        type: array
+    required:
+    - seats
+    type: object
+  httpgin.ConfirmOrderRequest:
+    properties:
+      hold_id:
+        type: string
+      total_cents:
+        type: integer
+    required:
+    - hold_id
+    - total_cents
+    type: object
+  httpgin.ConfirmOrderResponse:
+    properties:
+      event_id:
+        type: integer
+      order_id:
+        type: string
+    type: object
+  httpgin.CreateEventRequest:
+    properties:
+      ends_at:
+        type: string
+      starts_at:
+        type: string
+      title:
+        type: string
+      venue_id:
+        type: integer
+    required:
+    - ends_at
+    - starts_at
+    - title
+    - venue_id
+    type: object
+  httpgin.CreateEventResponse:
+    properties:
+      event_id:
+        type: integer
+    type: object
+  httpgin.CreateHoldRequest:
+    properties:
+      seat_ids:
+        items:
+          type: integer
+        minItems: 1
+        type: array
+      ttl_sec:
+        type: integer
+      user_id:
+        type: integer
+    required:
+    - seat_ids
+    - user_id
+    type: object
+  httpgin.CreateHoldResponse:
+    properties:
+      hold_id:
+        type: string
+    type: object
+  httpgin.CreateVenueRequest:
+    type: object
+  httpgin.CreateVenueResponse:
+    properties:
+      venue_id:
+        type: integer
+    type: object
+  httpgin.ErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  httpgin.SeatInput:
+    properties:
+      number:
+        type: integer
+      row:
+        type: string
+      section:
+        type: string
+    required:
+    - number
+    - row
+    - section
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: This is a sample server for a ticketing service.
+  title: TixGo API
+  version: "1.0"
+paths:
+  /admin/events:
+    post:
+      parameters:
+      - description: payload
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/httpgin.CreateEventRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/httpgin.CreateEventResponse'
+      summary: Create event and init seats
+  /admin/venues:
+    post:
+      parameters:
+      - description: payload
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/httpgin.CreateVenueRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/httpgin.CreateVenueResponse'
+      summary: Create venue
+  /admin/venues/{id}/seats:
+    post:
+      parameters:
+      - description: Venue ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: payload
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/httpgin.BatchCreateSeatsRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties:
+              type: integer
+            type: object
+      summary: Batch create seats
+  /events/{id}:
+    get:
+      parameters:
+      - description: Event ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/domain.Event'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/httpgin.ErrorResponse'
+      summary: Get event
+  /events/{id}/availability:
+    get:
+      parameters:
+      - description: Event ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/domain.EventCounts'
+      summary: Get availability counters
+  /events/{id}/holds:
+    post:
+      parameters:
+      - description: Event ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: payload
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/httpgin.CreateHoldRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/httpgin.CreateHoldResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httpgin.ErrorResponse'
+        "409":
+          description: seats unavailable / idem in progress
+          schema:
+            $ref: '#/definitions/httpgin.ErrorResponse'
+        "429":
+          description: rate limited
+          schema:
+            $ref: '#/definitions/httpgin.ErrorResponse'
+      summary: Create hold (idempotent)
+  /events/{id}/seats:
+    get:
+      parameters:
+      - description: Event ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: available
+        in: query
+        name: only
+        type: string
+      - description: page size
+        in: query
+        name: limit
+        type: integer
+      - description: offset
+        in: query
+        name: offset
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/domain.SeatWithStatus'
+            type: array
+      summary: List event seats
+  /orders/{id}:
+    get:
+      parameters:
+      - description: Order ID (uuid)
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/domain.OrderWithTickets'
+      summary: Get order with tickets
+  /orders/confirm:
+    post:
+      parameters:
+      - description: payload
+        in: body
+        name: req
+        required: true
+        schema:
+          $ref: '#/definitions/httpgin.ConfirmOrderRequest'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/httpgin.ConfirmOrderResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/httpgin.ErrorResponse'
+      summary: Confirm order
+swagger: "2.0"
